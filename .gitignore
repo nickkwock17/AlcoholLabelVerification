@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.vercel/
+.server.pid
+server.out.log
+server.err.log
+npm-debug.log*

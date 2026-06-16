@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TTB Alcohol Label Verification</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">TTB prototype</p>
+          <h1>Alcohol label verification</h1>
+        </div>
+        <div class="metric-strip" aria-label="Batch metrics">
+          <div class="metric">
+            <span>Target</span>
+            <strong id="targetMetric">&lt;=5.0s/image</strong>
+          </div>
+          <div class="metric">
+            <span>Processed</span>
+            <strong id="processedMetric">0</strong>
+          </div>
+          <div class="metric">
+            <span>Median</span>
+            <strong id="medianMetric">-</strong>
+          </div>
+          <div class="metric">
+            <span>Target hit</span>
+            <strong id="hitRateMetric">-</strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel input-panel" aria-labelledby="batch-title">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Input</p>
+              <h2 id="batch-title">Batch</h2>
+            </div>
+            <span id="queueCount" class="pill">0 images</span>
+          </div>
+
+          <label class="field-label" for="sharedText">Application text</label>
+          <textarea
+            id="sharedText"
+            class="textarea"
+            rows="10"
+            spellcheck="false"
+            placeholder="Paste the application text that should match the label artwork."
+          ></textarea>
+
+          <div id="dropZone" class="drop-zone">
+            <input id="fileInput" type="file" accept="image/*,.svg" multiple />
+            <div>
+              <strong>Label images</strong>
+              <span>PNG, JPG, WEBP, or SVG</span>
+            </div>
+            <button id="pickFilesButton" class="button" type="button">Choose</button>
+          </div>
+
+          <div class="actions">
+            <button id="loadSamplesButton" class="button" type="button">Load samples</button>
+            <button id="verifyButton" class="button primary" type="button">Run verification</button>
+            <button id="clearButton" class="button ghost" type="button">Clear</button>
+          </div>
+
+          <div class="status-line" role="status" aria-live="polite">
+            <span id="statusText">Ready</span>
+            <span id="statusDetail"></span>
+          </div>
+
+          <div id="queueList" class="queue-list" aria-label="Queued labels"></div>
+        </section>
+
+        <section class="panel results-panel" aria-labelledby="results-title">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Output</p>
+              <h2 id="results-title">Results</h2>
+            </div>
+            <button id="downloadButton" class="button ghost" type="button" disabled>Download JSON</button>
+          </div>
+
+          <div id="benchmarkSummary" class="benchmark-summary">
+            <div>
+              <span>Average</span>
+              <strong id="averageMetric">-</strong>
+            </div>
+            <div>
+              <span>P95</span>
+              <strong id="p95Metric">-</strong>
+            </div>
+            <div>
+              <span>Pass rate</span>
+              <strong id="passRateMetric">-</strong>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Verdict</th>
+                  <th scope="col">Image</th>
+                  <th scope="col">Latency</th>
+                  <th scope="col">Checks</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody">
+                <tr class="empty-row">
+                  <td colspan="4">No results yet</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="detailPanel" class="detail-panel" hidden></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
