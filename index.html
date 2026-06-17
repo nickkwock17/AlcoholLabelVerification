@@ -43,14 +43,63 @@
             <span id="queueCount" class="pill">0 images</span>
           </div>
 
-          <label class="field-label" for="sharedText">Application text</label>
-          <textarea
-            id="sharedText"
-            class="textarea"
-            rows="10"
-            spellcheck="false"
-            placeholder="Paste the application text that should match the label artwork."
-          ></textarea>
+          <div class="application-form" aria-labelledby="application-fields-title">
+            <div class="form-section-head">
+              <h3 id="application-fields-title">Application fields</h3>
+              <span class="pill">Common fields</span>
+            </div>
+
+            <div class="field-grid">
+              <label class="form-field" for="brandName">
+                <span>Brand Name</span>
+                <input id="brandName" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="classType">
+                <span>Class/Type</span>
+                <input id="classType" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="alcoholContent">
+                <span>Alcohol Content</span>
+                <input id="alcoholContent" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="netContents">
+                <span>Net Contents</span>
+                <input id="netContents" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="producerName">
+                <span>Producer/Bottler Name</span>
+                <input id="producerName" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="producerAddress">
+                <span>Producer/Bottler Address</span>
+                <input id="producerAddress" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="countryOfOrigin">
+                <span>Country of Origin</span>
+                <input id="countryOfOrigin" class="text-input" type="text" autocomplete="off" />
+              </label>
+
+              <label class="form-field" for="beverageType">
+                <span>Beverage Type</span>
+                <select id="beverageType" class="text-input">
+                  <option value="Distilled spirits">Distilled spirits</option>
+                  <option value="Wine">Wine</option>
+                  <option value="Beer/malt beverage">Beer/malt beverage</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="form-field warning-field" for="governmentWarning">
+              <span>Government Health Warning</span>
+              <textarea id="governmentWarning" class="textarea locked-textarea" rows="5" readonly></textarea>
+            </label>
+          </div>
 
           <div id="dropZone" class="drop-zone">
             <input id="fileInput" type="file" accept="image/*,.svg" multiple />

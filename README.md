@@ -92,6 +92,7 @@ The key must only live in environment variables. Do not paste it into client-sid
 ## Deployment On Vercel
 
 For a step-by-step tonight checklist, see `DEPLOYMENT_CHECKLIST.md`.
+For post-deployment improvement ideas, see `IMPROVEMENT_CHECKLIST.md`.
 
 1. Push this repository to GitHub.
 2. Create a Vercel account and sign in with GitHub.

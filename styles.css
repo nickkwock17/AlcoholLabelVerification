@@ -30,7 +30,8 @@ body {
 
 button,
 textarea,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -105,6 +106,7 @@ input {
 }
 
 .panel {
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -131,6 +133,52 @@ input {
   font-weight: 800;
 }
 
+.application-form {
+  display: grid;
+  gap: 12px;
+}
+
+.form-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.form-section-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.form-field span {
+  color: #263241;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.text-input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fbfcfe;
+  color: var(--ink);
+}
+
 .textarea {
   width: 100%;
   min-height: 168px;
@@ -143,10 +191,24 @@ input {
 }
 
 .textarea:focus,
+.text-input:focus,
 .drop-zone:focus-within,
 .queue-item textarea:focus {
   outline: 3px solid rgba(11, 107, 98, 0.18);
   border-color: var(--brand);
+}
+
+.warning-field {
+  margin-top: 2px;
+}
+
+.locked-textarea {
+  min-height: 82px;
+  max-height: 82px;
+  resize: none;
+  background: #f5f7fa;
+  color: #263241;
+  font-size: 0.82rem;
 }
 
 .drop-zone {
@@ -299,6 +361,26 @@ input {
   font-size: 0.82rem;
 }
 
+.queue-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.summary-chip {
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #eef2f6;
+  color: #415062;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pill,
 .status-pill,
 .verdict {
@@ -355,6 +437,7 @@ input {
 
 .table-wrap {
   overflow-x: auto;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -478,14 +561,12 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
-  .metric-strip,
   .workspace {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 620px) {
-  .metric-strip,
   .benchmark-summary {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -506,5 +587,16 @@ tbody tr:last-child td {
   .queue-item img {
     width: 52px;
     height: 66px;
+  }
+
+}
+
+@media (max-width: 520px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-strip {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

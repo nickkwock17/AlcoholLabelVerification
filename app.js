@@ -1,5 +1,16 @@
 const LATENCY_TARGET_MS = 5000;
 const CONCURRENCY = 3;
+const GOVERNMENT_WARNING =
+  "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
+
+const requiredFieldLabels = {
+  brandName: "Brand Name",
+  classType: "Class/Type",
+  alcoholContent: "Alcohol Content",
+  netContents: "Net Contents",
+  producerName: "Producer/Bottler Name",
+  producerAddress: "Producer/Bottler Address"
+};
 
 const sampleFiles = [
   "pass-distilled-spirits.png",
@@ -10,7 +21,17 @@ const sampleFiles = [
 ];
 
 const els = {
-  sharedText: document.querySelector("#sharedText"),
+  fields: {
+    brandName: document.querySelector("#brandName"),
+    classType: document.querySelector("#classType"),
+    alcoholContent: document.querySelector("#alcoholContent"),
+    netContents: document.querySelector("#netContents"),
+    producerName: document.querySelector("#producerName"),
+    producerAddress: document.querySelector("#producerAddress"),
+    countryOfOrigin: document.querySelector("#countryOfOrigin"),
+    beverageType: document.querySelector("#beverageType"),
+    governmentWarning: document.querySelector("#governmentWarning")
+  },
   fileInput: document.querySelector("#fileInput"),
   pickFilesButton: document.querySelector("#pickFilesButton"),
   dropZone: document.querySelector("#dropZone"),
@@ -79,6 +100,86 @@ function statusClass(status) {
   return "";
 }
 
+function readApplicationFields() {
+  return Object.fromEntries(
+    Object.entries(els.fields).map(([key, element]) => [key, element.value.trim()])
+  );
+}
+
+function setApplicationFields(values) {
+  for (const [key, value] of Object.entries(values)) {
+    if (els.fields[key]) {
+      els.fields[key].value = value ?? "";
+    }
+  }
+}
+
+function applicationFieldsToText(fields) {
+  const lines = [
+    ["Beverage Type", fields.beverageType],
+    ["Brand Name", fields.brandName],
+    ["Class/Type", fields.classType],
+    ["Alcohol Content", fields.alcoholContent],
+    ["Net Contents", fields.netContents],
+    ["Producer", fields.producerName],
+    ["Address", fields.producerAddress],
+    ["Country of Origin", fields.countryOfOrigin],
+    ["Government Warning", fields.governmentWarning || GOVERNMENT_WARNING]
+  ];
+
+  return lines
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}: ${value}`)
+    .join("\n");
+}
+
+function parseApplicationText(text) {
+  const values = {};
+  for (const line of text.split(/\r?\n/)) {
+    const [rawLabel, ...rest] = line.split(":");
+    const value = rest.join(":").trim();
+    if (!rawLabel || !value) {
+      continue;
+    }
+    const label = rawLabel.trim().toLowerCase();
+    if (label === "brand name" || label === "brand") values.brandName = value;
+    if (label === "class/type" || label === "class" || label === "type") values.classType = value;
+    if (label === "alcohol content" || label === "abv") values.alcoholContent = value;
+    if (label === "net contents" || label === "contents") values.netContents = value;
+    if (label === "producer" || label === "bottler" || label === "importer") values.producerName = value;
+    if (label === "address" || label === "producer address") values.producerAddress = value;
+    if (label === "country of origin" || label === "origin") values.countryOfOrigin = value;
+    if (label === "beverage type") values.beverageType = value;
+  }
+  return values;
+}
+
+function validateApplicationFields() {
+  const fields = readApplicationFields();
+  const missing = Object.entries(requiredFieldLabels).filter(([key]) => !fields[key]);
+  if (!missing.length) {
+    return { ok: true, fields, applicationText: applicationFieldsToText(fields) };
+  }
+
+  const [firstMissingKey] = missing[0];
+  els.fields[firstMissingKey].focus();
+  setStatus(
+    "Application fields incomplete",
+    `Missing ${missing.map(([, label]) => label).join(", ")}`
+  );
+  return { ok: false, fields, applicationText: "" };
+}
+
+function queueSummary(fields) {
+  const chips = [
+    fields.brandName,
+    fields.classType,
+    fields.alcoholContent,
+    fields.netContents
+  ].filter(Boolean);
+  return chips.length ? chips : ["Application fields pending"];
+}
+
 function renderQueue() {
   els.queueCount.textContent = `${state.items.length} image${state.items.length === 1 ? "" : "s"}`;
   els.queueList.innerHTML = "";
@@ -93,19 +194,12 @@ function renderQueue() {
           <span class="file-name" title="${item.file.name}">${item.file.name}</span>
           <span class="status-pill ${statusClass(item.status)}">${item.statusLabel || "Queued"}</span>
         </div>
-        <textarea data-item-text="${item.id}" spellcheck="false">${item.applicationText}</textarea>
+        <div class="queue-summary">
+          ${queueSummary(item.applicationFields).map((chip) => `<span class="summary-chip">${escapeHtml(chip)}</span>`).join("")}
+        </div>
       </div>
     `;
     els.queueList.append(row);
-  }
-
-  for (const textarea of els.queueList.querySelectorAll("[data-item-text]")) {
-    textarea.addEventListener("input", (event) => {
-      const item = state.items.find((candidate) => candidate.id === event.currentTarget.dataset.itemText);
-      if (item) {
-        item.applicationText = event.currentTarget.value;
-      }
-    });
   }
 
   els.verifyButton.disabled = state.running || state.items.length === 0;
@@ -243,7 +337,9 @@ async function compressImage(file) {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-function addFiles(files, applicationText = els.sharedText.value) {
+function addFiles(files) {
+  const applicationFields = readApplicationFields();
+  const applicationText = applicationFieldsToText(applicationFields);
   for (const file of files) {
     if (!file.type.startsWith("image/") && !file.name.toLowerCase().endsWith(".svg")) {
       continue;
@@ -252,6 +348,7 @@ function addFiles(files, applicationText = els.sharedText.value) {
       id: uid(),
       file,
       previewUrl: URL.createObjectURL(file),
+      applicationFields,
       applicationText,
       status: "queued",
       statusLabel: "Queued"
@@ -265,14 +362,18 @@ async function loadSamples() {
   const applicationText = await fetch("/test-labels/application-distilled-spirits.txt").then((res) =>
     res.text()
   );
-  els.sharedText.value = applicationText.trim();
+  setApplicationFields({
+    beverageType: "Distilled spirits",
+    governmentWarning: GOVERNMENT_WARNING,
+    ...parseApplicationText(applicationText)
+  });
   const files = [];
   for (const name of sampleFiles) {
     const response = await fetch(`/test-labels/${name}`);
     const blob = await response.blob();
     files.push(new File([blob], name, { type: blob.type || "image/png" }));
   }
-  addFiles(files, els.sharedText.value);
+  addFiles(files);
   setStatus("Samples loaded", `${files.length} images`);
 }
 
@@ -337,12 +438,19 @@ async function verifyBatch() {
     return;
   }
 
+  const validation = validateApplicationFields();
+  if (!validation.ok) {
+    return;
+  }
+
   state.running = true;
   state.results = [];
   els.detailPanel.hidden = true;
   for (const item of state.items) {
     item.status = "queued";
     item.statusLabel = "Queued";
+    item.applicationFields = validation.fields;
+    item.applicationText = validation.applicationText;
   }
   renderQueue();
   renderResults();
@@ -417,5 +525,6 @@ els.dropZone.addEventListener("drop", (event) => {
   addFiles(event.dataTransfer.files);
 });
 
+setApplicationFields({ governmentWarning: GOVERNMENT_WARNING, beverageType: "Distilled spirits" });
 renderQueue();
 renderResults();
