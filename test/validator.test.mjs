@@ -99,6 +99,22 @@ test("passes when OCR extracts warning heading and body separately", () => {
   assert.equal(result.verdict, "pass");
 });
 
+test("passes when structured warning heading omits colon but full OCR includes it", () => {
+  const extraction = baseExtraction({
+    label: {
+      ...baseExtraction().label,
+      governmentWarningText:
+        "(1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.",
+      warningHeading: "GOVERNMENT WARNING",
+      warningHeadingAllCaps: true,
+      warningHeadingBold: true,
+      fullOcrText: `OLD TOM DISTILLERY\nGOVERNMENT WARNING:\n(1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.`
+    }
+  });
+  const result = validateLabel({ applicationText, extraction });
+  assert.equal(result.verdict, "pass");
+});
+
 test("fails unconfirmed bold heading", () => {
   const extraction = baseExtraction({
     label: {
