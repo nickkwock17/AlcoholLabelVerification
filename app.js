@@ -6,6 +6,7 @@ const LARGE_BATCH_THRESHOLD = 200;
 const QUEUE_RENDER_LIMIT = 80;
 const IMAGE_MAX_SIDE = 1200;
 const IMAGE_JPEG_QUALITY = 0.78;
+const API_REQUEST_TIMEOUT_MS = 30_000;
 const GOVERNMENT_WARNING =
   "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
 
@@ -102,6 +103,35 @@ function formatMs(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
+async function fetchJsonWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    const payload = await response.json().catch(() => ({
+      ok: false,
+      message: "API returned a non-JSON response."
+    }));
+    return { response, payload };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error(
+        `Analysis timed out after ${Math.round(timeoutMs / 1000)} seconds. Use Retry failed to run this image again.`
+      );
+      timeoutError.status = 504;
+      timeoutError.timeout = true;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function percentile(values, p) {
   if (!values.length) {
     return null;
@@ -156,6 +186,12 @@ function hasLowConfidence(result) {
 
 function resultStatusLabel(result) {
   if (!result.ok) {
+    if (
+      result.detail?.timedOut ||
+      result.detail?.requestAttempts?.some((attempt) => attempt.timedOut)
+    ) {
+      return "TIMEOUT";
+    }
     return "API ERROR";
   }
   if (hasLowConfidence(result)) {
@@ -910,7 +946,7 @@ async function analyzeItem(item) {
     item.statusLabel = "Running";
     renderQueue();
 
-    const response = await fetch("/api/analyze", {
+    const { response, payload } = await fetchJsonWithTimeout("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -918,12 +954,8 @@ async function analyzeItem(item) {
         applicationText: item.applicationText,
         imageDataUrl
       })
-    });
+    }, API_REQUEST_TIMEOUT_MS);
 
-    const payload = await response.json().catch(() => ({
-      ok: false,
-      message: "API returned a non-JSON response."
-    }));
     const clientMs = performance.now() - started;
     result = {
       ...payload,
@@ -946,7 +978,12 @@ async function analyzeItem(item) {
       fileName: item.file.name,
       expectedVerdict: item.expectedVerdict,
       message: error.message || "Analysis request failed.",
-      detail: { error: error.message || String(error) },
+      detail: {
+        error: error.message || String(error),
+        status: error.status || null,
+        timedOut: error.timeout === true,
+        timeoutMs: API_REQUEST_TIMEOUT_MS
+      },
       timing: {
         clientMs,
         targetMs: LATENCY_TARGET_MS,

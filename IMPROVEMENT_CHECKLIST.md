@@ -78,6 +78,8 @@ Potential changes:
   - low-detail first pass for clean labels
   - high-detail retry only when confidence is low, image quality is poor, required fields are missing, or warning evidence is missing
 - [x] Add benchmark output for image detail mode and retry count.
+- [x] Add model request timeout and one transient retry to cap long outliers.
+- [x] Add browser and benchmark request timeouts so batches keep moving.
 - [ ] Tune batch concurrency against rate limits.
 - [ ] Run before/after production benchmark after Vercel redeploy.
 

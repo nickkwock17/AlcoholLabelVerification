@@ -102,6 +102,7 @@ export default async function handler(req, res) {
       message: error.message || "Analysis failed.",
       detail: error.detail || null,
       timing: {
+        modelMs: error.modelMs || null,
         serverMs,
         targetMs: LATENCY_TARGET_MS,
         meetsTarget: false

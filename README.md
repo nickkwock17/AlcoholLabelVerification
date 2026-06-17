@@ -68,6 +68,8 @@ OPENAI_API_KEY=sk-your-openai-api-key
 OPENAI_MODEL=gpt-5.4-mini
 OPENAI_IMAGE_DETAIL=adaptive
 OPENAI_RETRY_CONFIDENCE=0.72
+OPENAI_REQUEST_TIMEOUT_MS=10000
+OPENAI_TRANSIENT_RETRIES=1
 ```
 
 Run locally:
@@ -107,6 +109,8 @@ For post-deployment improvement ideas, see `IMPROVEMENT_CHECKLIST.md`.
    - `OPENAI_MODEL` set to `gpt-5.4-mini`
    - `OPENAI_IMAGE_DETAIL` set to `adaptive`
    - `OPENAI_RETRY_CONFIDENCE` set to `0.72`
+   - `OPENAI_REQUEST_TIMEOUT_MS` set to `10000`
+   - `OPENAI_TRANSIENT_RETRIES` set to `1`
 6. Deploy.
 7. Use the production URL Vercel provides.
 
@@ -281,6 +285,7 @@ npm run benchmark -- --url https://your-vercel-app.vercel.app --iterations 3 --c
 
 The benchmark sends the PNG fixtures in `test-labels/` to `/api/analyze` and prints per-image timings plus aggregate P50/P95/average metrics.
 It also reports the final image detail mode and whether adaptive analysis needed a high-detail retry.
+The benchmark request timeout defaults to 30 seconds and can be changed with `--request-timeout 45000`.
 
 ## Reading Slow Results
 
@@ -309,6 +314,9 @@ The deployed default is optimized for a 5 second per-image target:
 - The model extracts only visible label evidence from the image. Application text is parsed and compared in code.
 - `OPENAI_IMAGE_DETAIL=adaptive` starts with low image detail for speed.
 - If the fast pass has low confidence, poor image quality, missing required evidence, or no government warning evidence, the API retries once with high image detail.
+- `OPENAI_REQUEST_TIMEOUT_MS=10000` caps each model request attempt so an outlier cannot run for 60-100+ seconds.
+- `OPENAI_TRANSIENT_RETRIES=1` retries one transient timeout, rate-limit, or server error before returning an item-level API error.
+- The browser also has a 30 second per-image request cap so the batch keeps moving if a serverless request stalls.
 - The response includes `imageDetail` and `attempts` so benchmarks and detail views show whether a high-detail retry happened.
 
 ## Regulatory Sources

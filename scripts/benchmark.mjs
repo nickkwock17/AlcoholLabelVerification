@@ -15,6 +15,7 @@ const url = String(args.get("url") || "http://localhost:3000").replace(/\/$/, ""
 const iterations = Number(args.get("iterations") || 1);
 const concurrency = Number(args.get("concurrency") || 2);
 const targetMs = Number(args.get("target") || 5000);
+const requestTimeoutMs = Number(args.get("request-timeout") || 30_000);
 const textPath = args.get("text")
   ? String(args.get("text"))
   : fileURLToPath(new URL("../test-labels/application-distilled-spirits.txt", import.meta.url));
@@ -58,21 +59,75 @@ async function imageToDataUrl(file) {
   return `data:${mimeFor(file)};base64,${bytes.toString("base64")}`;
 }
 
+async function fetchJsonWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    const payload = await response.json().catch(() => ({
+      ok: false,
+      message: "API returned a non-JSON response."
+    }));
+    return { response, payload };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error(`Request exceeded ${Math.round(timeoutMs / 1000)} second timeout.`);
+      timeoutError.status = 504;
+      timeoutError.timeout = true;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function runOne(file, applicationText) {
   const imageDataUrl = await imageToDataUrl(file);
   const started = performance.now();
-  const response = await fetch(`${url}/api/analyze`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      fileName: basename(file),
-      applicationText,
-      imageDataUrl
-    })
-  });
-  const payload = await response.json();
-  const verdict = payload.verification?.verdict || "error";
   const expectedVerdict = expectedVerdictForFile(file);
+  let response;
+  let payload;
+
+  try {
+    ({ response, payload } = await fetchJsonWithTimeout(
+      `${url}/api/analyze`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: basename(file),
+          applicationText,
+          imageDataUrl
+        })
+      },
+      requestTimeoutMs
+    ));
+  } catch (error) {
+    const clientMs = performance.now() - started;
+    return {
+      file: basename(file),
+      ok: false,
+      status: error.status || 0,
+      verdict: "error",
+      expectedVerdict,
+      expectedVerdictMatched: expectedVerdict ? false : null,
+      message: error.message || "Benchmark request failed.",
+      imageDetail: "",
+      attempts: 0,
+      retryReason: "",
+      timedOut: error.timeout === true,
+      clientMs,
+      serverMs: null,
+      modelMs: null
+    };
+  }
+
+  const verdict = payload.verification?.verdict || "error";
   return {
     file: basename(file),
     ok: response.ok && payload.ok,
@@ -84,6 +139,7 @@ async function runOne(file, applicationText) {
     imageDetail: payload.imageDetail || "",
     attempts: Array.isArray(payload.attempts) ? payload.attempts.length : 0,
     retryReason: payload.attempts?.[0]?.retryReason || "",
+    timedOut: payload.detail?.requestAttempts?.some((attempt) => attempt.timedOut) || false,
     clientMs: performance.now() - started,
     serverMs: payload.timing?.serverMs,
     modelMs: payload.timing?.modelMs
@@ -133,6 +189,7 @@ console.table(
     clientMs: Math.round(result.clientMs),
     serverMs: Math.round(result.serverMs || 0),
     modelMs: Math.round(result.modelMs || 0),
+    timedOut: result.timedOut,
     retryReason: result.retryReason,
     message: result.message
   }))
@@ -146,6 +203,7 @@ console.log(
       iterations,
       concurrency,
       targetMs,
+      requestTimeoutMs,
       p50Ms: Math.round(percentile(timings, 50)),
       p95Ms: Math.round(percentile(timings, 95)),
       averageMs: Math.round(timings.reduce((sum, value) => sum + value, 0) / timings.length),
@@ -165,6 +223,7 @@ console.log(
         ])
       ),
       highDetailRetries: results.filter((result) => result.attempts > 1).length,
+      timedOutRequests: results.filter((result) => result.timedOut).length,
       apiFailures: failures.length
     },
     null,
