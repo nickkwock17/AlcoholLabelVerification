@@ -59,16 +59,19 @@ Goal: make large batches feel dependable instead of fragile.
 
 Reduce per-image latency while preserving accuracy.
 
+Status: initial optimization pass implemented.
+
 Potential changes:
 
-- Resize/compress images more aggressively before upload.
-- Test `OPENAI_IMAGE_DETAIL=low`.
-- Shorten the extraction prompt.
-- Simplify the extraction schema.
-- Use adaptive detail:
+- [x] Resize/compress images more aggressively before upload.
+- [x] Shorten the extraction prompt.
+- [x] Simplify the extraction schema so the model extracts label evidence only.
+- [x] Use adaptive detail:
   - low-detail first pass for clean labels
-  - high-detail retry only when confidence is low or required fields are missing
-- Tune batch concurrency against rate limits.
+  - high-detail retry only when confidence is low, image quality is poor, required fields are missing, or warning evidence is missing
+- [x] Add benchmark output for image detail mode and retry count.
+- [ ] Tune batch concurrency against rate limits.
+- [ ] Run before/after production benchmark after Vercel redeploy.
 
 Goal: keep typical labels under the 5 second target and improve throughput for large batches.
 

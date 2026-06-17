@@ -69,7 +69,7 @@ export default async function handler(req, res) {
   try {
     const body = await readJsonBody(req);
     const input = validateRequest(body);
-    const { extraction, model, usage, modelMs } = await extractLabel(input);
+    const { extraction, model, usage, imageDetail, attempts, modelMs } = await extractLabel(input);
     const verification = validateLabel({
       applicationText: input.applicationText,
       extraction
@@ -80,7 +80,12 @@ export default async function handler(req, res) {
       ok: true,
       fileName: input.fileName,
       model,
-      extraction,
+      imageDetail,
+      attempts,
+      extraction: {
+        ...extraction,
+        expected: verification.expected
+      },
       verification,
       usage,
       timing: {

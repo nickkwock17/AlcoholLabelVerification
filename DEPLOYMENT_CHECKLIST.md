@@ -31,7 +31,8 @@ git --version
 ```bash
 OPENAI_API_KEY=sk-your-real-key
 OPENAI_MODEL=gpt-5.4-mini
-OPENAI_IMAGE_DETAIL=high
+OPENAI_IMAGE_DETAIL=adaptive
+OPENAI_RETRY_CONFIDENCE=0.72
 ```
 
 Run:
@@ -83,7 +84,8 @@ git push -u origin main
 ```text
 OPENAI_API_KEY = your real OpenAI key
 OPENAI_MODEL = gpt-5.4-mini
-OPENAI_IMAGE_DETAIL = high
+OPENAI_IMAGE_DETAIL = adaptive
+OPENAI_RETRY_CONFIDENCE = 0.72
 ```
 
 6. Click **Deploy**.

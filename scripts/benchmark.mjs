@@ -28,6 +28,17 @@ function mimeFor(file) {
   return "application/octet-stream";
 }
 
+function expectedVerdictForFile(file) {
+  const name = basename(file).toLowerCase();
+  if (name.startsWith("pass-")) {
+    return "pass";
+  }
+  if (name.startsWith("fail-")) {
+    return "fail";
+  }
+  return null;
+}
+
 async function defaultImages() {
   const dir = fileURLToPath(new URL("../test-labels/", import.meta.url));
   const entries = await readdir(dir);
@@ -60,12 +71,19 @@ async function runOne(file, applicationText) {
     })
   });
   const payload = await response.json();
+  const verdict = payload.verification?.verdict || "error";
+  const expectedVerdict = expectedVerdictForFile(file);
   return {
     file: basename(file),
     ok: response.ok && payload.ok,
     status: response.status,
-    verdict: payload.verification?.verdict || "error",
+    verdict,
+    expectedVerdict,
+    expectedVerdictMatched: expectedVerdict ? verdict === expectedVerdict : null,
     message: payload.message || "",
+    imageDetail: payload.imageDetail || "",
+    attempts: Array.isArray(payload.attempts) ? payload.attempts.length : 0,
+    retryReason: payload.attempts?.[0]?.retryReason || "",
     clientMs: performance.now() - started,
     serverMs: payload.timing?.serverMs,
     modelMs: payload.timing?.modelMs
@@ -97,15 +115,25 @@ const results = await runQueue(tasks, concurrency, (file) => runOne(file, applic
 const timings = results.map((result) => result.clientMs);
 const withinTarget = results.filter((result) => result.clientMs <= targetMs).length;
 const failures = results.filter((result) => !result.ok);
+const expectedResults = results.filter((result) => result.expectedVerdict);
+const expectedMatches = expectedResults.filter((result) => result.expectedVerdictMatched).length;
+const expectedMismatches = expectedResults.filter(
+  (result) => result.expectedVerdictMatched === false
+);
 
 console.table(
   results.map((result) => ({
     file: result.file,
     verdict: result.verdict,
+    expected: result.expectedVerdict || "",
+    expectedMatch: result.expectedVerdictMatched,
     ok: result.ok,
+    detail: result.imageDetail,
+    attempts: result.attempts,
     clientMs: Math.round(result.clientMs),
     serverMs: Math.round(result.serverMs || 0),
     modelMs: Math.round(result.modelMs || 0),
+    retryReason: result.retryReason,
     message: result.message
   }))
 );
@@ -122,6 +150,21 @@ console.log(
       p95Ms: Math.round(percentile(timings, 95)),
       averageMs: Math.round(timings.reduce((sum, value) => sum + value, 0) / timings.length),
       targetHitRate: `${withinTarget}/${results.length}`,
+      expectedVerdictMatchRate: expectedResults.length
+        ? `${expectedMatches}/${expectedResults.length}`
+        : "not available",
+      expectedVerdictMismatches: expectedMismatches.map((result) => ({
+        file: result.file,
+        expected: result.expectedVerdict,
+        verdict: result.verdict
+      })),
+      detailModes: Object.fromEntries(
+        [...new Set(results.map((result) => result.imageDetail || "unknown"))].map((detail) => [
+          detail,
+          results.filter((result) => (result.imageDetail || "unknown") === detail).length
+        ])
+      ),
+      highDetailRetries: results.filter((result) => result.attempts > 1).length,
       apiFailures: failures.length
     },
     null,
@@ -129,6 +172,6 @@ console.log(
   )
 );
 
-if (failures.length) {
+if (failures.length || expectedMismatches.length) {
   process.exitCode = 1;
 }

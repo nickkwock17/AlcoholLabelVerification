@@ -63,7 +63,8 @@ Set:
 ```bash
 OPENAI_API_KEY=sk-your-openai-api-key
 OPENAI_MODEL=gpt-5.4-mini
-OPENAI_IMAGE_DETAIL=high
+OPENAI_IMAGE_DETAIL=adaptive
+OPENAI_RETRY_CONFIDENCE=0.72
 ```
 
 Run locally:
@@ -101,7 +102,8 @@ For post-deployment improvement ideas, see `IMPROVEMENT_CHECKLIST.md`.
 5. In **Environment Variables**, add:
    - `OPENAI_API_KEY`
    - `OPENAI_MODEL` set to `gpt-5.4-mini`
-   - `OPENAI_IMAGE_DETAIL` set to `high`
+   - `OPENAI_IMAGE_DETAIL` set to `adaptive`
+   - `OPENAI_RETRY_CONFIDENCE` set to `0.72`
 6. Deploy.
 7. Use the production URL Vercel provides.
 
@@ -153,7 +155,7 @@ It also reports batch-level:
 - median
 - P95
 - target hit rate
-- pass rate
+- expected verdict match rate for named fixtures
 
 For command-line benchmarking against a running local or deployed app:
 
@@ -168,6 +170,17 @@ npm run benchmark -- --url https://your-vercel-app.vercel.app --iterations 3 --c
 ```
 
 The benchmark sends the PNG fixtures in `test-labels/` to `/api/analyze` and prints per-image timings plus aggregate P50/P95/average metrics.
+It also reports the final image detail mode and whether adaptive analysis needed a high-detail retry.
+
+## Latency Strategy
+
+The deployed default is optimized for a 5 second per-image target:
+
+- The browser resizes label images to a maximum side of 1200 pixels and sends JPEG at 0.78 quality.
+- The model extracts only visible label evidence from the image. Application text is parsed and compared in code.
+- `OPENAI_IMAGE_DETAIL=adaptive` starts with low image detail for speed.
+- If the fast pass has low confidence, poor image quality, missing required evidence, or no government warning evidence, the API retries once with high image detail.
+- The response includes `imageDetail` and `attempts` so benchmarks and detail views show whether a high-detail retry happened.
 
 ## Regulatory Sources
 

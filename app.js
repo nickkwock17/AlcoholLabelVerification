@@ -1,5 +1,7 @@
 const LATENCY_TARGET_MS = 5000;
 const CONCURRENCY = 3;
+const IMAGE_MAX_SIDE = 1200;
+const IMAGE_JPEG_QUALITY = 0.78;
 const GOVERNMENT_WARNING =
   "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
 
@@ -50,7 +52,7 @@ const els = {
   hitRateMetric: document.querySelector("#hitRateMetric"),
   averageMetric: document.querySelector("#averageMetric"),
   p95Metric: document.querySelector("#p95Metric"),
-  passRateMetric: document.querySelector("#passRateMetric")
+  expectedMatchMetric: document.querySelector("#expectedMatchMetric")
 };
 
 const state = {
@@ -98,6 +100,21 @@ function statusClass(status) {
     return "running";
   }
   return "";
+}
+
+function expectedVerdictForFileName(fileName) {
+  const normalized = String(fileName || "").toLowerCase();
+  if (normalized.startsWith("pass-")) {
+    return "pass";
+  }
+  if (normalized.startsWith("fail-")) {
+    return "fail";
+  }
+  return null;
+}
+
+function actualVerdict(result) {
+  return result.ok ? result.verification?.verdict : "error";
 }
 
 function readApplicationFields() {
@@ -180,6 +197,10 @@ function queueSummary(fields) {
   return chips.length ? chips : ["Application fields pending"];
 }
 
+function expectedSummary(item) {
+  return item.expectedVerdict ? [`Expected ${item.expectedVerdict.toUpperCase()}`] : [];
+}
+
 function renderQueue() {
   els.queueCount.textContent = `${state.items.length} image${state.items.length === 1 ? "" : "s"}`;
   els.queueList.innerHTML = "";
@@ -195,7 +216,7 @@ function renderQueue() {
           <span class="status-pill ${statusClass(item.status)}">${item.statusLabel || "Queued"}</span>
         </div>
         <div class="queue-summary">
-          ${queueSummary(item.applicationFields).map((chip) => `<span class="summary-chip">${escapeHtml(chip)}</span>`).join("")}
+          ${[...queueSummary(item.applicationFields), ...expectedSummary(item)].map((chip) => `<span class="summary-chip">${escapeHtml(chip)}</span>`).join("")}
         </div>
       </div>
     `;
@@ -210,7 +231,10 @@ function renderMetrics() {
   const timings = completed
     .map((result) => result.timing?.clientMs ?? result.timing?.serverMs)
     .filter((value) => Number.isFinite(value));
-  const passes = completed.filter((result) => result.verification?.verdict === "pass").length;
+  const expectedResults = state.results.filter((result) => result.expectedVerdict);
+  const expectedMatches = expectedResults.filter(
+    (result) => actualVerdict(result) === result.expectedVerdict
+  ).length;
   const targetHits = timings.filter((value) => value <= LATENCY_TARGET_MS).length;
   const average = timings.length ? timings.reduce((sum, value) => sum + value, 0) / timings.length : null;
 
@@ -219,7 +243,9 @@ function renderMetrics() {
   els.hitRateMetric.textContent = timings.length ? `${Math.round((targetHits / timings.length) * 100)}%` : "-";
   els.averageMetric.textContent = formatMs(average);
   els.p95Metric.textContent = formatMs(percentile(timings, 95));
-  els.passRateMetric.textContent = completed.length ? `${Math.round((passes / completed.length) * 100)}%` : "-";
+  els.expectedMatchMetric.textContent = expectedResults.length
+    ? `${Math.round((expectedMatches / expectedResults.length) * 100)}%`
+    : "-";
   els.downloadButton.disabled = state.results.length === 0;
 }
 
@@ -233,16 +259,27 @@ function renderResults() {
   }
 
   for (const result of state.results) {
-    const verdict = result.ok ? result.verification.verdict : "error";
+    const verdict = actualVerdict(result);
     const failedChecks = result.ok
       ? result.verification.checks.filter((check) => check.status === "fail")
       : [];
+    const expectedMatch =
+      result.expectedVerdict && verdict === result.expectedVerdict ? "matches expected" : "";
+    const expectedMismatch =
+      result.expectedVerdict && verdict !== result.expectedVerdict
+        ? `expected ${result.expectedVerdict.toUpperCase()}`
+        : "";
+    const resultMeta = result.ok
+      ? [result.model, result.imageDetail ? `${result.imageDetail} detail` : "", expectedMatch, expectedMismatch]
+          .filter(Boolean)
+          .join(" | ")
+      : [result.message, expectedMismatch].filter(Boolean).join(" | ");
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><span class="verdict ${verdict}">${verdict.toUpperCase()}</span></td>
       <td>
         <span class="result-name">${result.fileName}</span>
-        <span class="result-sub">${result.ok ? result.model : result.message}</span>
+        <span class="result-sub">${escapeHtml(resultMeta)}</span>
         <button class="detail-button" data-detail="${result.itemId}" type="button">Details</button>
       </td>
       <td>
@@ -257,6 +294,13 @@ function renderResults() {
                 ? failedChecks.map((check) => `<span class="check-chip fail">${check.label}</span>`).join("")
                 : '<span class="check-chip">All checks passed</span>'
               : '<span class="check-chip fail">Analysis error</span>'
+          }
+          ${
+            result.expectedVerdict
+              ? `<span class="check-chip ${verdict === result.expectedVerdict ? "" : "fail"}">${
+                  verdict === result.expectedVerdict ? "Expected verdict matched" : "Expected verdict mismatch"
+                }</span>`
+              : ""
           }
         </div>
       </td>
@@ -279,6 +323,15 @@ function renderResults() {
 function showDetails(result) {
   els.detailPanel.hidden = false;
   const checks = result.ok ? result.verification.checks : [];
+  const extraction = result.ok
+    ? {
+        expectedVerdict: result.expectedVerdict,
+        expectedVerdictMatched: result.expectedVerdict ? actualVerdict(result) === result.expectedVerdict : null,
+        imageDetail: result.imageDetail,
+        attempts: result.attempts,
+        ...result.extraction
+      }
+    : result.detail ?? result;
   els.detailPanel.innerHTML = `
     <h3>${result.fileName}</h3>
     <div class="detail-grid">
@@ -288,7 +341,7 @@ function showDetails(result) {
       </div>
       <div class="detail-box">
         <h4>Extraction</h4>
-        <pre>${escapeHtml(JSON.stringify(result.extraction ?? result.detail ?? result, null, 2))}</pre>
+        <pre>${escapeHtml(JSON.stringify(extraction, null, 2))}</pre>
       </div>
     </div>
   `;
@@ -323,8 +376,7 @@ async function loadImage(dataUrl) {
 async function compressImage(file) {
   const original = await fileToDataUrl(file);
   const image = await loadImage(original);
-  const maxSide = 1400;
-  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
   const height = Math.max(1, Math.round(image.naturalHeight * scale));
   const canvas = document.createElement("canvas");
@@ -334,7 +386,7 @@ async function compressImage(file) {
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", 0.82);
+  return canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
 }
 
 function addFiles(files) {
@@ -351,7 +403,8 @@ function addFiles(files) {
       applicationFields,
       applicationText,
       status: "queued",
-      statusLabel: "Queued"
+      statusLabel: "Queued",
+      expectedVerdict: expectedVerdictForFileName(file.name)
     });
   }
   renderQueue();
@@ -406,6 +459,7 @@ async function analyzeItem(item) {
     ok: response.ok && payload.ok,
     itemId: item.id,
     fileName: item.file.name,
+    expectedVerdict: item.expectedVerdict,
     timing: {
       ...(payload.timing ?? {}),
       clientMs,
@@ -413,9 +467,12 @@ async function analyzeItem(item) {
       meetsTarget: clientMs <= LATENCY_TARGET_MS
     }
   };
+  result.expectedVerdictMatched = result.expectedVerdict
+    ? actualVerdict(result) === result.expectedVerdict
+    : null;
 
-  item.status = result.ok ? result.verification.verdict : "error";
-  item.statusLabel = result.ok ? result.verification.verdict.toUpperCase() : "Error";
+  item.status = actualVerdict(result);
+  item.statusLabel = actualVerdict(result).toUpperCase();
   state.results.push(result);
   renderQueue();
   renderResults();
