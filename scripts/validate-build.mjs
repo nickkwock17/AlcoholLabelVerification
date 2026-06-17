@@ -7,6 +7,7 @@ const requiredFiles = [
   "api/analyze.js",
   "lib/validator.js",
   "test-labels/application-distilled-spirits.txt",
+  "test-labels/applications.csv",
   "test-labels/pass-distilled-spirits.svg"
 ];
 

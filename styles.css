@@ -211,6 +211,115 @@ select {
   font-size: 0.82rem;
 }
 
+.batch-imports {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.import-control {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.import-control input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.import-control strong,
+.import-control span {
+  display: block;
+}
+
+.import-control span {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.concurrency-control {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.concurrency-control span {
+  color: #263241;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.concurrency-control input {
+  min-height: 34px;
+}
+
+.concurrency-control strong {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.csv-match-summary {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f5f7fa;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.unmatched-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.unmatched-list {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf5;
+}
+
+.unmatched-list h4 {
+  margin: 0 0 7px;
+  color: var(--amber);
+  font-size: 0.82rem;
+}
+
+.unmatched-list ul {
+  display: grid;
+  gap: 4px;
+  max-height: 116px;
+  margin: 0;
+  overflow: auto;
+  padding-left: 18px;
+  color: #415062;
+  font-size: 0.78rem;
+}
+
 .drop-zone {
   position: relative;
   display: grid;
@@ -304,6 +413,47 @@ select {
   font-size: 0.84rem;
 }
 
+.batch-progress {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.progress-bar {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: #e5ebf2;
+}
+
+.progress-bar > div {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width 180ms ease;
+}
+
+.queue-render-summary {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #edf8f5;
+  color: var(--brand-dark);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .queue-list {
   display: grid;
   gap: 10px;
@@ -381,6 +531,21 @@ select {
   white-space: nowrap;
 }
 
+.summary-chip.success {
+  background: #e6f6ee;
+  color: var(--green);
+}
+
+.summary-chip.warn {
+  background: #fff7dd;
+  color: var(--amber);
+}
+
+.summary-chip.fail {
+  background: #fdeceb;
+  color: var(--red);
+}
+
 .pill,
 .status-pill,
 .verdict {
@@ -408,6 +573,11 @@ select {
 .status-pill.running {
   background: #e8f1ff;
   color: var(--blue);
+}
+
+.status-pill.paused {
+  background: #fff7dd;
+  color: var(--amber);
 }
 
 .status-pill.pass,
@@ -569,6 +739,11 @@ tbody tr:last-child td {
 @media (max-width: 620px) {
   .benchmark-summary {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .batch-imports,
+  .unmatched-panel {
+    grid-template-columns: 1fr;
   }
 
   .workspace {

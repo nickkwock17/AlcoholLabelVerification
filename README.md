@@ -6,8 +6,9 @@ The app supports batch image upload, AI-assisted OCR extraction, deterministic c
 
 ## What It Does
 
-- Accepts one or more label images.
-- Accepts application text for the expected label fields.
+- Accepts one or more label images, with browser-side batches capped at 300 images.
+- Accepts application data through structured fields or a CSV matched by `file_name`.
+- Shows unmatched images and unmatched CSV rows before verification.
 - Extracts label text and fields from each image with an OpenAI vision-capable model.
 - Verifies common fields in code:
   - brand name
@@ -19,13 +20,15 @@ The app supports batch image upload, AI-assisted OCR extraction, deterministic c
   - country of origin when supplied in the application text
   - government health warning text, capitalization, and bold heading
 - Reports pass/fail, failed checks, extracted evidence, model time, server time, and total client-observed latency.
-- Shows benchmark metrics for average, median, P95, and target hit rate.
+- Shows benchmark metrics for average, median, P95, target hit rate, and expected verdict match rate.
+- Supports adjustable concurrency, progress, ETA, pause/resume, item-level API errors, and retrying failed/error items.
 
 ## Architecture
 
 ```text
 Browser UI
   -> compresses images to JPEG
+  -> matches images to CSV application rows when provided
   -> sends each image + application text to /api/analyze
 
 Vercel Serverless Function
@@ -120,6 +123,113 @@ Sample fixtures live in `test-labels/`.
 - `fail-brand-mismatch.png`
 
 Use **Load samples** in the app to populate the batch with these images and matching application text.
+It also loads `test-labels/applications.csv`, which demonstrates CSV-to-image pairing.
+
+## Running UI Test Batches
+
+### Few-image smoke test
+
+Use this when you want a quick functional check with the built-in fixtures.
+
+1. Start the local app:
+
+   ```bash
+   npm run dev
+   ```
+
+2. Open `http://localhost:3000`.
+3. Click **Load samples**.
+4. Confirm the CSV status says `CSV matching: 5 rows, 5/5 images matched`.
+5. Click **Run verification**.
+6. Confirm the expected verdict metric matches all named fixtures.
+
+This test makes 5 OpenAI API calls.
+
+### Large local batch test
+
+Use this when you want to exercise the browser queue, CSV matching, progress, concurrency, and retry controls with 100-300 images.
+
+From the repository root in PowerShell, generate a local duplicate-image batch:
+
+```powershell
+$batchSize = 100
+$sourceDir = "test-labels"
+$outDir = "test-batches\$batchSize-images"
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+$rows = Import-Csv "$sourceDir\applications.csv"
+$outRows = for ($i = 1; $i -le $batchSize; $i++) {
+  $row = $rows[($i - 1) % $rows.Count]
+  $base = [System.IO.Path]::GetFileNameWithoutExtension($row.file_name)
+  $ext = [System.IO.Path]::GetExtension($row.file_name)
+  $newName = "{0}-{1:D3}{2}" -f $base, $i, $ext
+
+  Copy-Item "$sourceDir\$($row.file_name)" "$outDir\$newName" -Force
+
+  [pscustomobject]@{
+    file_name = $newName
+    brand_name = $row.brand_name
+    class_type = $row.class_type
+    alcohol_content = $row.alcohol_content
+    net_contents = $row.net_contents
+    producer_name = $row.producer_name
+    producer_address = $row.producer_address
+    country_of_origin = $row.country_of_origin
+    beverage_type = $row.beverage_type
+    expected_verdict = $row.expected_verdict
+  }
+}
+
+$outRows | Export-Csv "$outDir\applications-$batchSize.csv" -NoTypeInformation
+```
+
+For 200 or 300 images, change `$batchSize` to `200` or `300`.
+
+Then run the UI test:
+
+1. Start the local app with `npm run dev`.
+2. Open `http://localhost:3000`.
+3. Click **Choose CSV** and select `test-batches\100-images\applications-100.csv`.
+4. Click **Choose Images** and select the generated `.png` files from `test-batches\100-images`.
+5. Confirm the CSV status says `CSV matching: 100 rows, 100/100 images matched`.
+6. Set concurrency to `3` or `4` for a realistic local test.
+7. Click **Run verification**.
+8. Watch expected verdict match rate, target hit rate, P95 latency, and any item-level `API ERROR` results.
+
+Do not click **Load samples** for this test. That loads the original 5 images, whose filenames do not match the generated 100-row CSV.
+
+Running the full test makes one OpenAI API call per image. A 100-image test makes 100 API calls; a 300-image test makes 300 API calls.
+
+## CSV Batch Upload
+
+For large batches, upload a CSV with one row per label image. The browser workflow is designed for 200-300 images per batch and caps each queued batch at 300 images.
+
+Recommended columns:
+
+```text
+file_name,brand_name,class_type,alcohol_content,net_contents,producer_name,producer_address,country_of_origin,beverage_type
+```
+
+Optional columns:
+
+```text
+expected_verdict,government_warning
+```
+
+The app matches each image to a CSV row by `file_name`. When a CSV is loaded, images without a matching row are flagged before verification. CSV rows without images are also shown so the reviewer can catch incomplete uploads.
+
+## Batch Reliability
+
+The browser runner keeps batch state locally:
+
+- 300-image maximum per queued batch.
+- Large-batch queue preview renders priority cards instead of all cards so the browser stays responsive.
+- Adjustable concurrency from 1 to 8 workers.
+- Progress bar and ETA based on completed items.
+- Pause/resume stops assigning new work while active requests finish.
+- API/network failures become per-item `API ERROR` results instead of stopping the batch.
+- Results are preserved as each item finishes.
+- **Retry failed** reruns failed or errored items and replaces their previous result.
 
 ## Verification
 
@@ -171,6 +281,25 @@ npm run benchmark -- --url https://your-vercel-app.vercel.app --iterations 3 --c
 
 The benchmark sends the PNG fixtures in `test-labels/` to `/api/analyze` and prints per-image timings plus aggregate P50/P95/average metrics.
 It also reports the final image detail mode and whether adaptive analysis needed a high-detail retry.
+
+## Reading Slow Results
+
+The UI reports three useful timing values:
+
+- `client` is the browser-observed total for one image, including browser image compression, upload, Vercel/API time, model time, validation, and response parsing.
+- `server` is the time spent inside `/api/analyze`.
+- `model` is the time spent waiting for the OpenAI model response.
+
+Per-image timing starts when a worker begins that item, so it does not include time spent waiting in the queue behind earlier images. If one image shows 60-100+ seconds, check its detail panel and record:
+
+- file name
+- verdict and expected verdict
+- client/server/model times
+- image detail mode
+- number of attempts
+- retry reason, if any
+
+If `model` time is also high, the outlier came from the model request or provider/network latency. If `client` is high but `server` and `model` are normal, the outlier is more likely browser upload, local network, or response handling. For repeatable benchmark numbers, run the same batch at concurrency `2`, `3`, and `4`, then compare P95 and target hit rate.
 
 ## Latency Strategy
 

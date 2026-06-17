@@ -1,5 +1,9 @@
 const LATENCY_TARGET_MS = 5000;
-const CONCURRENCY = 3;
+const DEFAULT_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 8;
+const MAX_BATCH_IMAGES = 300;
+const LARGE_BATCH_THRESHOLD = 200;
+const QUEUE_RENDER_LIMIT = 80;
 const IMAGE_MAX_SIDE = 1200;
 const IMAGE_JPEG_QUALITY = 0.78;
 const GOVERNMENT_WARNING =
@@ -35,13 +39,27 @@ const els = {
     governmentWarning: document.querySelector("#governmentWarning")
   },
   fileInput: document.querySelector("#fileInput"),
+  csvInput: document.querySelector("#csvInput"),
   pickFilesButton: document.querySelector("#pickFilesButton"),
+  pickCsvButton: document.querySelector("#pickCsvButton"),
+  csvFileName: document.querySelector("#csvFileName"),
+  csvMatchSummary: document.querySelector("#csvMatchSummary"),
+  unmatchedPanel: document.querySelector("#unmatchedPanel"),
   dropZone: document.querySelector("#dropZone"),
   loadSamplesButton: document.querySelector("#loadSamplesButton"),
   verifyButton: document.querySelector("#verifyButton"),
+  pauseButton: document.querySelector("#pauseButton"),
+  retryButton: document.querySelector("#retryButton"),
   clearButton: document.querySelector("#clearButton"),
   downloadButton: document.querySelector("#downloadButton"),
+  concurrencyInput: document.querySelector("#concurrencyInput"),
+  concurrencyValue: document.querySelector("#concurrencyValue"),
+  progressText: document.querySelector("#progressText"),
+  etaText: document.querySelector("#etaText"),
+  progressFill: document.querySelector("#progressFill"),
+  progressBar: document.querySelector(".progress-bar"),
   queueList: document.querySelector("#queueList"),
+  queueRenderSummary: document.querySelector("#queueRenderSummary"),
   queueCount: document.querySelector("#queueCount"),
   statusText: document.querySelector("#statusText"),
   statusDetail: document.querySelector("#statusDetail"),
@@ -58,7 +76,14 @@ const els = {
 const state = {
   items: [],
   running: false,
-  results: []
+  paused: false,
+  activeWorkers: 0,
+  runToken: 0,
+  batchStartedAt: 0,
+  completedThisRun: 0,
+  results: [],
+  csvRows: [],
+  csvFileName: ""
 };
 
 function uid() {
@@ -99,6 +124,9 @@ function statusClass(status) {
   if (status === "running" || status === "preparing") {
     return "running";
   }
+  if (status === "paused") {
+    return "paused";
+  }
   return "";
 }
 
@@ -114,7 +142,173 @@ function expectedVerdictForFileName(fileName) {
 }
 
 function actualVerdict(result) {
-  return result.ok ? result.verification?.verdict : "error";
+  return result.ok ? result.verification?.verdict || "error" : "error";
+}
+
+function hasLowConfidence(result) {
+  return Boolean(
+    result.ok &&
+      result.verification?.checks?.some(
+        (check) => check.id === "ocrConfidence" && check.status === "fail"
+      )
+  );
+}
+
+function resultStatusLabel(result) {
+  if (!result.ok) {
+    return "API ERROR";
+  }
+  if (hasLowConfidence(result)) {
+    return "LOW CONF";
+  }
+  return actualVerdict(result).toUpperCase();
+}
+
+function upsertResult(result) {
+  const index = state.results.findIndex((candidate) => candidate.itemId === result.itemId);
+  if (index >= 0) {
+    state.results[index] = result;
+  } else {
+    state.results.push(result);
+  }
+
+  const itemOrder = new Map(state.items.map((item, itemIndex) => [item.id, itemIndex]));
+  state.results.sort((a, b) => (itemOrder.get(a.itemId) ?? 0) - (itemOrder.get(b.itemId) ?? 0));
+}
+
+function isDoneStatus(status) {
+  return status === "pass" || status === "fail" || status === "error";
+}
+
+function fileKey(fileName) {
+  return String(fileName || "")
+    .split(/[\\/]/)
+    .pop()
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeCsvKey(value) {
+  return String(value || "")
+    .replace(/^\ufeff/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeExpectedVerdict(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "pass" || normalized === "fail") {
+    return normalized;
+  }
+  return null;
+}
+
+function csvValue(row, keys) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && String(value).trim()) {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") {
+        index += 1;
+      }
+      row.push(value);
+      if (row.some((cell) => String(cell).trim())) {
+        rows.push(row);
+      }
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value);
+  if (row.some((cell) => String(cell).trim())) {
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function parseApplicationCsv(text) {
+  const table = parseCsv(text);
+  if (table.length < 2) {
+    throw new Error("CSV needs a header row and at least one application row.");
+  }
+
+  const headers = table[0].map(normalizeCsvKey);
+  if (!headers.some((header) => ["file_name", "filename", "file"].includes(header))) {
+    throw new Error("CSV must include a file_name column.");
+  }
+
+  return table.slice(1).map((values, index) => {
+    const raw = {};
+    headers.forEach((header, valueIndex) => {
+      raw[header] = String(values[valueIndex] || "").trim();
+    });
+
+    const fileName = csvValue(raw, ["file_name", "filename", "file"]);
+    if (!fileName) {
+      throw new Error(`CSV row ${index + 2} is missing file_name.`);
+    }
+
+    const fields = {
+      brandName: csvValue(raw, ["brand_name", "brand"]),
+      classType: csvValue(raw, ["class_type", "class", "type"]),
+      alcoholContent: csvValue(raw, ["alcohol_content", "abv"]),
+      netContents: csvValue(raw, ["net_contents", "contents"]),
+      producerName: csvValue(raw, ["producer_name", "producer", "bottler_name", "importer_name"]),
+      producerAddress: csvValue(raw, ["producer_address", "address", "bottler_address", "importer_address"]),
+      countryOfOrigin: csvValue(raw, ["country_of_origin", "origin"]),
+      beverageType: csvValue(raw, ["beverage_type", "beverage"]) || "Distilled spirits",
+      governmentWarning: csvValue(raw, ["government_warning", "government_health_warning"]) || GOVERNMENT_WARNING
+    };
+
+    return {
+      id: uid(),
+      rowNumber: index + 2,
+      fileName,
+      fileKey: fileKey(fileName),
+      raw,
+      fields,
+      applicationText: applicationFieldsToText(fields),
+      expectedVerdict: normalizeExpectedVerdict(csvValue(raw, ["expected_verdict", "expected"]))
+    };
+  });
+}
+
+function requiredMissing(fields) {
+  return Object.entries(requiredFieldLabels)
+    .filter(([key]) => !fields[key])
+    .map(([, label]) => label);
 }
 
 function readApplicationFields() {
@@ -201,33 +395,251 @@ function expectedSummary(item) {
   return item.expectedVerdict ? [`Expected ${item.expectedVerdict.toUpperCase()}`] : [];
 }
 
+function csvSummary(item) {
+  if (!state.csvRows.length) {
+    return [];
+  }
+  if (item.csvStatus === "matched") {
+    return [{ text: "CSV matched", className: "success" }];
+  }
+  return [{ text: "Missing CSV row", className: "fail" }];
+}
+
+function queueChips(item) {
+  return [
+    ...queueSummary(item.applicationFields).map((text) => ({ text, className: "" })),
+    ...expectedSummary(item).map((text) => ({ text, className: "warn" })),
+    ...csvSummary(item),
+    ...(item.errorMessage ? [{ text: item.errorMessage, className: "fail" }] : [])
+  ];
+}
+
+function renderChip(chip) {
+  return `<span class="summary-chip ${chip.className}">${escapeHtml(chip.text)}</span>`;
+}
+
+function renderQueueItem(item) {
+  const row = document.createElement("article");
+  row.className = "queue-item";
+  row.innerHTML = `
+    <img alt="" src="${item.previewUrl}" />
+    <div class="queue-meta">
+      <div class="queue-title">
+        <span class="file-name" title="${item.file.name}">${item.file.name}</span>
+        <span class="status-pill ${statusClass(item.status)}">${item.statusLabel || "Queued"}</span>
+      </div>
+      <div class="queue-summary">
+        ${queueChips(item).map(renderChip).join("")}
+      </div>
+    </div>
+  `;
+  return row;
+}
+
+function visibleQueueItems() {
+  if (state.items.length <= QUEUE_RENDER_LIMIT) {
+    return state.items;
+  }
+
+  const selected = new Set();
+  const visible = [];
+  const add = (item) => {
+    if (item && !selected.has(item.id) && visible.length < QUEUE_RENDER_LIMIT) {
+      selected.add(item.id);
+      visible.push(item);
+    }
+  };
+
+  for (const item of state.items) {
+    if (
+      item.status === "running" ||
+      item.status === "preparing" ||
+      item.status === "error" ||
+      item.csvStatus === "missing"
+    ) {
+      add(item);
+    }
+  }
+
+  for (const item of state.items) {
+    if (isDoneStatus(item.status)) {
+      add(item);
+    }
+  }
+
+  for (const item of state.items) {
+    add(item);
+  }
+
+  return visible;
+}
+
+function renderQueueRenderSummary(visibleCount) {
+  const total = state.items.length;
+  if (!total) {
+    els.queueRenderSummary.textContent = "";
+    els.queueRenderSummary.hidden = true;
+    return;
+  }
+
+  const largeBatchText =
+    total >= LARGE_BATCH_THRESHOLD
+      ? `Large batch mode: all ${total} images will process with ${currentConcurrency()} concurrent workers.`
+      : `Batch ready: ${total} image${total === 1 ? "" : "s"}.`;
+  const previewText =
+    total > visibleCount
+      ? ` Showing ${visibleCount} priority queue cards to keep the browser responsive.`
+      : "";
+
+  els.queueRenderSummary.textContent = `${largeBatchText}${previewText}`;
+  els.queueRenderSummary.hidden = false;
+}
+
+function updateCsvPairing() {
+  const rowsByFile = new Map();
+  for (const row of state.csvRows) {
+    row.matchedCount = 0;
+    if (!rowsByFile.has(row.fileKey)) {
+      rowsByFile.set(row.fileKey, row);
+    }
+  }
+
+  for (const item of state.items) {
+    const row = rowsByFile.get(fileKey(item.file.name));
+    if (state.csvRows.length && row) {
+      row.matchedCount += 1;
+      item.csvRowId = row.id;
+      item.csvStatus = "matched";
+      item.applicationFields = row.fields;
+      item.applicationText = row.applicationText;
+      item.expectedVerdict = row.expectedVerdict || expectedVerdictForFileName(item.file.name);
+    } else {
+      item.csvRowId = null;
+      item.csvStatus = state.csvRows.length ? "missing" : "manual";
+      item.expectedVerdict = expectedVerdictForFileName(item.file.name);
+    }
+  }
+}
+
+function listPreview(items) {
+  const visible = items.slice(0, 20);
+  const extra = items.length - visible.length;
+  return [
+    ...visible.map((item) => `<li>${escapeHtml(item)}</li>`),
+    extra > 0 ? `<li>${extra} more</li>` : ""
+  ].join("");
+}
+
+function renderCsvSummary() {
+  els.csvFileName.textContent = state.csvFileName || "No CSV loaded";
+
+  if (!state.csvRows.length) {
+    els.csvMatchSummary.textContent = "CSV matching: no CSV loaded";
+    els.unmatchedPanel.hidden = true;
+    els.unmatchedPanel.innerHTML = "";
+    return;
+  }
+
+  const missingImages = state.items
+    .filter((item) => item.csvStatus === "missing")
+    .map((item) => item.file.name);
+  const unmatchedRows = state.csvRows
+    .filter((row) => !row.matchedCount)
+    .map((row) => `${row.fileName} (row ${row.rowNumber})`);
+  const matchedImages = state.items.filter((item) => item.csvStatus === "matched").length;
+
+  els.csvMatchSummary.textContent = `CSV matching: ${state.csvRows.length} rows, ${matchedImages}/${state.items.length} images matched`;
+  els.unmatchedPanel.hidden = missingImages.length === 0 && unmatchedRows.length === 0;
+  els.unmatchedPanel.innerHTML = `
+    ${
+      missingImages.length
+        ? `<div class="unmatched-list"><h4>Images without CSV rows</h4><ul>${listPreview(missingImages)}</ul></div>`
+        : ""
+    }
+    ${
+      unmatchedRows.length
+        ? `<div class="unmatched-list"><h4>CSV rows without images</h4><ul>${listPreview(unmatchedRows)}</ul></div>`
+        : ""
+    }
+  `;
+}
+
 function renderQueue() {
   els.queueCount.textContent = `${state.items.length} image${state.items.length === 1 ? "" : "s"}`;
   els.queueList.innerHTML = "";
+  const visibleItems = visibleQueueItems();
 
-  for (const item of state.items) {
-    const row = document.createElement("article");
-    row.className = "queue-item";
-    row.innerHTML = `
-      <img alt="" src="${item.previewUrl}" />
-      <div class="queue-meta">
-        <div class="queue-title">
-          <span class="file-name" title="${item.file.name}">${item.file.name}</span>
-          <span class="status-pill ${statusClass(item.status)}">${item.statusLabel || "Queued"}</span>
-        </div>
-        <div class="queue-summary">
-          ${[...queueSummary(item.applicationFields), ...expectedSummary(item)].map((chip) => `<span class="summary-chip">${escapeHtml(chip)}</span>`).join("")}
-        </div>
-      </div>
-    `;
-    els.queueList.append(row);
+  for (const item of visibleItems) {
+    els.queueList.append(renderQueueItem(item));
   }
 
+  renderQueueRenderSummary(visibleItems.length);
+  renderCsvSummary();
+  renderProgress();
+  renderControls();
+}
+
+function currentConcurrency() {
+  const parsed = Number(els.concurrencyInput.value);
+  const value = Math.max(1, Math.min(MAX_CONCURRENCY, Number.isFinite(parsed) ? parsed : DEFAULT_CONCURRENCY));
+  els.concurrencyInput.value = String(value);
+  return value;
+}
+
+function failedItems() {
+  return state.items.filter((item) => item.status === "fail" || item.status === "error");
+}
+
+function inProgressItems() {
+  return state.items.filter((item) => item.status === "queued" || item.status === "preparing" || item.status === "running");
+}
+
+function formatEta(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "ETA -";
+  }
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) {
+    return `ETA ${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `ETA ${minutes}m ${remainingSeconds}s`;
+}
+
+function renderProgress() {
+  const total = state.items.length;
+  const complete = state.items.filter((item) => isDoneStatus(item.status)).length;
+  const percent = total ? Math.round((complete / total) * 100) : 0;
+  const active = state.activeWorkers;
+  const remaining = inProgressItems().length;
+  const elapsed = state.batchStartedAt ? performance.now() - state.batchStartedAt : 0;
+  const average = state.completedThisRun ? elapsed / state.completedThisRun : null;
+  const eta = state.running && average ? average * remaining : null;
+
+  els.progressText.textContent = `${complete}/${total} complete${active ? `, ${active} active` : ""}`;
+  els.etaText.textContent = formatEta(eta);
+  els.progressFill.style.width = `${percent}%`;
+  els.progressBar.setAttribute("aria-valuenow", String(percent));
+}
+
+function renderControls() {
+  const concurrency = currentConcurrency();
+  els.concurrencyValue.textContent = `${concurrency} concurrent`;
   els.verifyButton.disabled = state.running || state.items.length === 0;
+  els.pauseButton.disabled = !state.running;
+  els.pauseButton.textContent = state.paused ? "Resume" : "Pause";
+  els.retryButton.disabled = state.running || failedItems().length === 0;
+  els.clearButton.disabled = state.running;
+  els.loadSamplesButton.disabled = state.running;
+  els.pickFilesButton.disabled = state.running;
+  els.pickCsvButton.disabled = state.running;
+  els.concurrencyInput.disabled = false;
 }
 
 function renderMetrics() {
   const completed = state.results.filter((result) => result.ok);
+  const processed = state.results.length;
   const timings = completed
     .map((result) => result.timing?.clientMs ?? result.timing?.serverMs)
     .filter((value) => Number.isFinite(value));
@@ -238,7 +650,7 @@ function renderMetrics() {
   const targetHits = timings.filter((value) => value <= LATENCY_TARGET_MS).length;
   const average = timings.length ? timings.reduce((sum, value) => sum + value, 0) / timings.length : null;
 
-  els.processedMetric.textContent = String(completed.length);
+  els.processedMetric.textContent = String(processed);
   els.medianMetric.textContent = formatMs(percentile(timings, 50));
   els.hitRateMetric.textContent = timings.length ? `${Math.round((targetHits / timings.length) * 100)}%` : "-";
   els.averageMetric.textContent = formatMs(average);
@@ -389,13 +801,48 @@ async function compressImage(file) {
   return canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
 }
 
+function setCsvRows(rows, fileName) {
+  state.csvRows = rows;
+  state.csvFileName = fileName;
+  updateCsvPairing();
+  renderQueue();
+  setStatus("CSV loaded", `${rows.length} application row${rows.length === 1 ? "" : "s"}`);
+}
+
+async function handleCsvFile(file) {
+  if (!file || state.running) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    setCsvRows(parseApplicationCsv(text), file.name);
+  } catch (error) {
+    state.csvRows = [];
+    state.csvFileName = "";
+    updateCsvPairing();
+    renderQueue();
+    setStatus("CSV could not be loaded", error.message || "Check the file format.");
+  } finally {
+    els.csvInput.value = "";
+  }
+}
+
 function addFiles(files) {
+  if (state.running) {
+    return;
+  }
+
   const applicationFields = readApplicationFields();
   const applicationText = applicationFieldsToText(applicationFields);
-  for (const file of files) {
-    if (!file.type.startsWith("image/") && !file.name.toLowerCase().endsWith(".svg")) {
-      continue;
-    }
+  const imageFiles = Array.from(files).filter(
+    (file) => file.type.startsWith("image/") || file.name.toLowerCase().endsWith(".svg")
+  );
+  const availableSlots = Math.max(0, MAX_BATCH_IMAGES - state.items.length);
+  const acceptedFiles = imageFiles.slice(0, availableSlots);
+  const skippedForLimit = imageFiles.length - acceptedFiles.length;
+
+  for (const file of acceptedFiles) {
     state.items.push({
       id: uid(),
       file,
@@ -404,22 +851,39 @@ function addFiles(files) {
       applicationText,
       status: "queued",
       statusLabel: "Queued",
+      csvStatus: state.csvRows.length ? "missing" : "manual",
       expectedVerdict: expectedVerdictForFileName(file.name)
     });
   }
+  updateCsvPairing();
   renderQueue();
+
+  if (skippedForLimit > 0) {
+    setStatus(
+      "Batch limit reached",
+      `Queued ${acceptedFiles.length}; skipped ${skippedForLimit} image${skippedForLimit === 1 ? "" : "s"} above the ${MAX_BATCH_IMAGES} image limit`
+    );
+  } else if (acceptedFiles.length) {
+    setStatus(
+      state.items.length >= LARGE_BATCH_THRESHOLD ? "Large batch queued" : "Images queued",
+      `${state.items.length}/${MAX_BATCH_IMAGES} image capacity used`
+    );
+  }
 }
 
 async function loadSamples() {
   setStatus("Loading samples");
+  clearAll();
   const applicationText = await fetch("/test-labels/application-distilled-spirits.txt").then((res) =>
     res.text()
   );
+  const csvText = await fetch("/test-labels/applications.csv").then((res) => res.text());
   setApplicationFields({
     beverageType: "Distilled spirits",
     governmentWarning: GOVERNMENT_WARNING,
     ...parseApplicationText(applicationText)
   });
+  setCsvRows(parseApplicationCsv(csvText), "applications.csv");
   const files = [];
   for (const name of sampleFiles) {
     const response = await fetch(`/test-labels/${name}`);
@@ -433,102 +897,265 @@ async function loadSamples() {
 async function analyzeItem(item) {
   item.status = "preparing";
   item.statusLabel = "Preparing";
+  item.errorMessage = "";
   renderQueue();
 
   const started = performance.now();
-  const imageDataUrl = await compressImage(item.file);
+  let result;
 
-  item.status = "running";
-  item.statusLabel = "Running";
-  renderQueue();
+  try {
+    const imageDataUrl = await compressImage(item.file);
 
-  const response = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    item.status = "running";
+    item.statusLabel = "Running";
+    renderQueue();
+
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: item.file.name,
+        applicationText: item.applicationText,
+        imageDataUrl
+      })
+    });
+
+    const payload = await response.json().catch(() => ({
+      ok: false,
+      message: "API returned a non-JSON response."
+    }));
+    const clientMs = performance.now() - started;
+    result = {
+      ...payload,
+      ok: response.ok && payload.ok,
+      itemId: item.id,
       fileName: item.file.name,
-      applicationText: item.applicationText,
-      imageDataUrl
-    })
-  });
+      expectedVerdict: item.expectedVerdict,
+      timing: {
+        ...(payload.timing ?? {}),
+        clientMs,
+        targetMs: LATENCY_TARGET_MS,
+        meetsTarget: clientMs <= LATENCY_TARGET_MS
+      }
+    };
+  } catch (error) {
+    const clientMs = performance.now() - started;
+    result = {
+      ok: false,
+      itemId: item.id,
+      fileName: item.file.name,
+      expectedVerdict: item.expectedVerdict,
+      message: error.message || "Analysis request failed.",
+      detail: { error: error.message || String(error) },
+      timing: {
+        clientMs,
+        targetMs: LATENCY_TARGET_MS,
+        meetsTarget: false
+      }
+    };
+  }
 
-  const payload = await response.json();
-  const clientMs = performance.now() - started;
-  const result = {
-    ...payload,
-    ok: response.ok && payload.ok,
-    itemId: item.id,
-    fileName: item.file.name,
-    expectedVerdict: item.expectedVerdict,
-    timing: {
-      ...(payload.timing ?? {}),
-      clientMs,
-      targetMs: LATENCY_TARGET_MS,
-      meetsTarget: clientMs <= LATENCY_TARGET_MS
-    }
-  };
   result.expectedVerdictMatched = result.expectedVerdict
     ? actualVerdict(result) === result.expectedVerdict
     : null;
 
   item.status = actualVerdict(result);
-  item.statusLabel = actualVerdict(result).toUpperCase();
-  state.results.push(result);
+  item.statusLabel = resultStatusLabel(result);
+  item.result = result;
+  item.errorMessage = result.ok ? "" : result.message || "Analysis error";
+  upsertResult(result);
   renderQueue();
   renderResults();
 }
 
-async function runWithConcurrency(items, limit, worker) {
-  let index = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) {
-      const current = items[index];
-      index += 1;
-      await worker(current);
+function validateItemsReady(items) {
+  if (!items.length) {
+    setStatus("No images queued");
+    return false;
+  }
+
+  if (state.csvRows.length) {
+    const missingCsv = items.filter((item) => item.csvStatus !== "matched");
+    if (missingCsv.length) {
+      setStatus("CSV pairing incomplete", `${missingCsv.length} image${missingCsv.length === 1 ? "" : "s"} missing CSV rows`);
+      renderCsvSummary();
+      return false;
     }
-  });
-  await Promise.all(runners);
+  } else {
+    const validation = validateApplicationFields();
+    if (!validation.ok) {
+      return false;
+    }
+    for (const item of items) {
+      item.applicationFields = validation.fields;
+      item.applicationText = validation.applicationText;
+      item.csvStatus = "manual";
+    }
+  }
+
+  const missingFields = items
+    .map((item) => ({
+      item,
+      missing: requiredMissing(item.applicationFields)
+    }))
+    .find((entry) => entry.missing.length);
+
+  if (missingFields) {
+    setStatus(
+      "Application data incomplete",
+      `${missingFields.item.file.name} missing ${missingFields.missing.join(", ")}`
+    );
+    return false;
+  }
+
+  return true;
 }
 
-async function verifyBatch() {
-  if (state.running || !state.items.length) {
-    return;
-  }
-
-  const validation = validateApplicationFields();
-  if (!validation.ok) {
-    return;
-  }
-
-  state.running = true;
-  state.results = [];
-  els.detailPanel.hidden = true;
-  for (const item of state.items) {
+function resetItemsForRun(items, { clearResults }) {
+  for (const item of items) {
     item.status = "queued";
-    item.statusLabel = "Queued";
-    item.applicationFields = validation.fields;
-    item.applicationText = validation.applicationText;
+    item.statusLabel = clearResults ? "Queued" : "Retry queued";
+    item.errorMessage = "";
+    if (clearResults) {
+      item.result = null;
+    }
   }
-  renderQueue();
-  renderResults();
-  setStatus("Running verification", `${Math.min(CONCURRENCY, state.items.length)} concurrent`);
 
-  const batchStarted = performance.now();
-  try {
-    await runWithConcurrency(state.items, CONCURRENCY, analyzeItem);
-    const batchMs = performance.now() - batchStarted;
+  if (clearResults) {
+    state.results = [];
+  }
+}
+
+function takeNextItem() {
+  const item = state.items.find((candidate) => candidate.status === "queued");
+  if (!item) {
+    return null;
+  }
+  item.status = "preparing";
+  item.statusLabel = "Preparing";
+  return item;
+}
+
+function finishBatchIfDone(token) {
+  if (token !== state.runToken) {
+    return;
+  }
+
+  const pending = state.items.some(
+    (item) => item.status === "queued" || item.status === "preparing" || item.status === "running"
+  );
+
+  if (state.paused && state.activeWorkers === 0) {
+    setStatus("Batch paused", `${state.items.filter((item) => isDoneStatus(item.status)).length}/${state.items.length} complete`);
+  }
+
+  if (!pending && state.activeWorkers === 0) {
+    const batchMs = performance.now() - state.batchStartedAt;
     const timings = state.results
       .map((result) => result.timing?.clientMs)
       .filter((value) => Number.isFinite(value));
     const targetHits = timings.filter((value) => value <= LATENCY_TARGET_MS).length;
+    state.running = false;
+    state.paused = false;
     setStatus(
       "Batch complete",
       `${formatMs(batchMs)} total, ${targetHits}/${timings.length} images within target`
     );
-  } finally {
-    state.running = false;
-    renderQueue();
   }
+
+  renderQueue();
+  renderResults();
+}
+
+async function workerLoop(token) {
+  state.activeWorkers += 1;
+  renderQueue();
+
+  try {
+    while (token === state.runToken && state.running && !state.paused) {
+      const item = takeNextItem();
+      if (!item) {
+        break;
+      }
+      renderQueue();
+      await analyzeItem(item);
+      state.completedThisRun += 1;
+      renderProgress();
+    }
+  } finally {
+    state.activeWorkers = Math.max(0, state.activeWorkers - 1);
+    finishBatchIfDone(token);
+  }
+}
+
+function startWorkers(token = state.runToken) {
+  if (!state.running || state.paused) {
+    renderControls();
+    return;
+  }
+
+  const hasQueued = () => state.items.some((item) => item.status === "queued");
+  while (state.activeWorkers < currentConcurrency() && hasQueued()) {
+    workerLoop(token);
+  }
+
+  finishBatchIfDone(token);
+}
+
+function startBatch(items, { clearResults }) {
+  if (!validateItemsReady(items)) {
+    renderQueue();
+    return;
+  }
+
+  state.runToken += 1;
+  state.running = true;
+  state.paused = false;
+  state.activeWorkers = 0;
+  state.batchStartedAt = performance.now();
+  state.completedThisRun = 0;
+  els.detailPanel.hidden = true;
+  resetItemsForRun(items, { clearResults });
+  renderQueue();
+  renderResults();
+  setStatus("Running verification", `${Math.min(currentConcurrency(), items.length)} concurrent`);
+  startWorkers(state.runToken);
+}
+
+function verifyBatch() {
+  if (state.running || !state.items.length) {
+    return;
+  }
+
+  startBatch(state.items, { clearResults: true });
+}
+
+function togglePause() {
+  if (!state.running) {
+    return;
+  }
+
+  state.paused = !state.paused;
+  if (state.paused) {
+    setStatus("Pausing batch", `${state.activeWorkers} active item${state.activeWorkers === 1 ? "" : "s"} finishing`);
+  } else {
+    setStatus("Running verification", `${Math.min(currentConcurrency(), inProgressItems().length)} concurrent`);
+    startWorkers(state.runToken);
+  }
+  renderQueue();
+}
+
+function retryFailedItems() {
+  if (state.running) {
+    return;
+  }
+
+  const retryItems = failedItems();
+  if (!retryItems.length) {
+    return;
+  }
+
+  startBatch(retryItems, { clearResults: false });
 }
 
 function clearAll() {
@@ -537,7 +1164,16 @@ function clearAll() {
   }
   state.items = [];
   state.results = [];
+  state.csvRows = [];
+  state.csvFileName = "";
+  state.running = false;
+  state.paused = false;
+  state.activeWorkers = 0;
+  state.runToken += 1;
+  state.batchStartedAt = 0;
+  state.completedThisRun = 0;
   els.detailPanel.hidden = true;
+  updateCsvPairing();
   renderQueue();
   renderResults();
   setStatus("Ready");
@@ -558,11 +1194,24 @@ function downloadResults() {
 }
 
 els.pickFilesButton.addEventListener("click", () => els.fileInput.click());
-els.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
+els.pickCsvButton.addEventListener("click", () => els.csvInput.click());
+els.fileInput.addEventListener("change", (event) => {
+  addFiles(event.target.files);
+  event.target.value = "";
+});
+els.csvInput.addEventListener("change", (event) => handleCsvFile(event.target.files[0]));
 els.loadSamplesButton.addEventListener("click", loadSamples);
 els.verifyButton.addEventListener("click", verifyBatch);
+els.pauseButton.addEventListener("click", togglePause);
+els.retryButton.addEventListener("click", retryFailedItems);
 els.clearButton.addEventListener("click", clearAll);
 els.downloadButton.addEventListener("click", downloadResults);
+els.concurrencyInput.addEventListener("input", () => {
+  renderControls();
+  if (state.running && !state.paused) {
+    startWorkers(state.runToken);
+  }
+});
 
 for (const eventName of ["dragenter", "dragover"]) {
   els.dropZone.addEventListener(eventName, (event) => {

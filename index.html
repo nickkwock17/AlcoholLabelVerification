@@ -101,11 +101,31 @@
             </label>
           </div>
 
+          <div class="batch-imports" aria-label="Batch setup">
+            <div class="import-control">
+              <input id="csvInput" type="file" accept=".csv,text/csv" />
+              <div>
+                <strong>Application CSV</strong>
+                <span id="csvFileName">No CSV loaded</span>
+              </div>
+              <button id="pickCsvButton" class="button" type="button">Choose CSV</button>
+            </div>
+
+            <label class="concurrency-control" for="concurrencyInput">
+              <span>Concurrency</span>
+              <input id="concurrencyInput" class="text-input" type="number" min="1" max="8" value="3" />
+              <strong id="concurrencyValue">3 concurrent</strong>
+            </label>
+          </div>
+
+          <div id="csvMatchSummary" class="csv-match-summary">CSV matching: no CSV loaded</div>
+          <div id="unmatchedPanel" class="unmatched-panel" hidden></div>
+
           <div id="dropZone" class="drop-zone">
             <input id="fileInput" type="file" accept="image/*,.svg" multiple />
             <div>
               <strong>Label images</strong>
-              <span>PNG, JPG, WEBP, or SVG</span>
+              <span>PNG, JPG, WEBP, or SVG, up to 300 per batch</span>
             </div>
             <button id="pickFilesButton" class="button" type="button">Choose</button>
           </div>
@@ -113,6 +133,8 @@
           <div class="actions">
             <button id="loadSamplesButton" class="button" type="button">Load samples</button>
             <button id="verifyButton" class="button primary" type="button">Run verification</button>
+            <button id="pauseButton" class="button" type="button" disabled>Pause</button>
+            <button id="retryButton" class="button ghost" type="button" disabled>Retry failed</button>
             <button id="clearButton" class="button ghost" type="button">Clear</button>
           </div>
 
@@ -121,6 +143,17 @@
             <span id="statusDetail"></span>
           </div>
 
+          <div class="batch-progress" aria-label="Batch progress">
+            <div class="progress-head">
+              <span id="progressText">0/0 complete</span>
+              <span id="etaText">ETA -</span>
+            </div>
+            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="progressFill"></div>
+            </div>
+          </div>
+
+          <div id="queueRenderSummary" class="queue-render-summary"></div>
           <div id="queueList" class="queue-list" aria-label="Queued labels"></div>
         </section>
 

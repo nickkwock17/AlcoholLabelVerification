@@ -1,0 +1,6 @@
+file_name,brand_name,class_type,alcohol_content,net_contents,producer_name,producer_address,country_of_origin,beverage_type,expected_verdict
+pass-distilled-spirits.png,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,Old Tom Distillery,"112 Barrel House Road, Frankfort, KY 40601",,Distilled spirits,pass
+fail-warning-case.png,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,Old Tom Distillery,"112 Barrel House Road, Frankfort, KY 40601",,Distilled spirits,fail
+fail-abv-mismatch.png,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,Old Tom Distillery,"112 Barrel House Road, Frankfort, KY 40601",,Distilled spirits,fail
+fail-missing-net-contents.png,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,Old Tom Distillery,"112 Barrel House Road, Frankfort, KY 40601",,Distilled spirits,fail
+fail-brand-mismatch.png,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,Old Tom Distillery,"112 Barrel House Road, Frankfort, KY 40601",,Distilled spirits,fail

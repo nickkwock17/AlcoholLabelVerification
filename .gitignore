@@ -6,4 +6,6 @@ node_modules/
 .server.pid
 server.out.log
 server.err.log
+server.dev.log
+test-batches/
 npm-debug.log*

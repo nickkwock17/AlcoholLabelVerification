@@ -24,6 +24,8 @@ Goal: make the app feel closer to the form data a reviewer would compare against
 
 Add a CSV upload flow for large batches.
 
+Status: implemented in the browser workflow.
+
 Suggested columns:
 
 ```text
@@ -32,10 +34,11 @@ file_name,brand_name,class_type,alcohol_content,net_contents,producer_name,produ
 
 Expected behavior:
 
-- Upload CSV.
-- Upload many label images.
-- Match each image to its CSV row by `file_name`.
-- Show unmatched images and unmatched CSV rows before running verification.
+- [x] Upload CSV.
+- [x] Upload many label images.
+- [x] Match each image to its CSV row by `file_name`.
+- [x] Show unmatched images and unmatched CSV rows before running verification.
+- [x] Include a sample CSV fixture for the built-in test labels.
 
 Goal: support realistic 200-300 label application batches without manual entry.
 
@@ -43,15 +46,20 @@ Goal: support realistic 200-300 label application batches without manual entry.
 
 Improve the batch runner for high-volume uploads.
 
+Status: initial browser-side reliability pass implemented.
+
 Add:
 
-- Adjustable concurrency.
-- Progress bar.
-- Estimated time remaining.
-- Pause/resume.
-- Retry failed items.
-- Partial result preservation.
-- Clear error states for API failures and low-confidence extractions.
+- [x] Adjustable concurrency.
+- [x] Progress bar.
+- [x] Estimated time remaining.
+- [x] Pause/resume.
+- [x] Retry failed items.
+- [x] Partial result preservation.
+- [x] Clear error states for API failures and low-confidence extractions.
+- [x] 200-300 image batch support with a 300-image cap.
+- [x] Large-batch queue preview to keep the browser responsive.
+- [ ] Consider backend queueing if production batches exceed browser/serverless limits.
 
 Goal: make large batches feel dependable instead of fragile.
 
